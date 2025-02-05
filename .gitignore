@@ -1,18 +1,18 @@
 # Node.js
 node_modules
+/frontend/node_modules
+/backend/node_modules
 *.log
 /build/
 
 # Python 가상환경
 .venv/
 backend/.venv/
+/backend/__pycache__/
+/backend/**/*.pyc
 
 # IDE 관련파일
 .vscode/
-
-# Python 바이트코드 파일 무시
-*.pyc
-__pycache__/
 
 # Chrome 프로필 관련파일 무시
 chrome_profile/
@@ -51,6 +51,9 @@ yarn-error.log*
 # 테스트 커버리지
 /coverage
 
+# 프로젝트 특정 폴더
+/error_screenshots/
+/logs/
 # 기타
 .idea/
 *.iml

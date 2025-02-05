@@ -5,6 +5,7 @@ node_modules
 
 # Python 가상환경
 .venv/
+backend/.venv/
 
 # IDE 관련파일
 .vscode/

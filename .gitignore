@@ -8,12 +8,6 @@ node_modules
 # IDE 관련 파일
 .vscode/
 
-# Node.js 관련
-package-lock.json
-
-# 문서 관련
-PROJECT_DOCUMENTATION.md
-
 # Python 바이트코드 파일 무시
 *.pyc
 __pycache__/

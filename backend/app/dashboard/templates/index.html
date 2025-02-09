@@ -361,66 +361,87 @@
             }
 
             async function displayResults(data) {
+                // 검색 의도 표시
+                const searchIntents = document.getElementById('searchIntents');
+                const intentDescriptions = {
+                    'income': '💰 수입/재테크 관련',
+                    'travel': '🌍 여행/관광 관련',
+                    'food': '🍽️ 맛집/음식 관련',
+                    'shopping': '🛒 쇼핑/구매 관련',
+                    'living': '🏠 생활/주거 관련',
+                    'info': 'ℹ️ 정보/지식 관련'
+                };
+
+                if (searchIntents && data.intent) {
+                    searchIntents.innerHTML = data.intent.map(intent => 
+                        `<span class="badge bg-primary me-2 mb-2">${intentDescriptions[intent] || intent}</span>`
+                    ).join('');
+                }
+                
+                // 확장 키워드 표시
+                const expandedKeywords = document.getElementById('expandedKeywords');
+                if (expandedKeywords && data.search_keywords) {
+                    expandedKeywords.innerHTML = data.search_keywords.map(keyword =>
+                        `<span class="keyword-chip me-2 mb-2" onclick="searchKeyword('${keyword}')">${keyword}</span>`
+                    ).join('');
+                }
+
                 if (!blogResults || !newsResults) {
                     console.error('Results container not found');
-                        return;
-                    }
+                    return;
+                }
 
-                    // 블로그 결과 표시
+                // 블로그 결과 표시
                 const blog_results = data.blog_results || [];
                 if (blog_results.length === 0) {
                     blogResults.innerHTML = '<p class="text-center">블로그 검색 결과가 없습니다.</p>';
                 } else {
                     const blogHtml = blog_results.map(result => `
-                            <div class="blog-item">
-                                <div class="d-flex justify-content-between align-items-start">
-                                <h5 class="mb-1"><a href="${result.link || result.url}" target="_blank" class="text-decoration-none">${result.title}</a></h5>
+                        <div class="blog-item">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <h5 class="mb-1"><a href="${result.link}" target="_blank" class="text-decoration-none">${result.title}</a></h5>
                                 <div class="score-badges">
                                     ${result.relevance_score ? 
                                         `<span class="badge bg-primary" title="관련도 점수">관련도: ${result.relevance_score.toFixed(1)}</span>` : ''}
-                                    ${result.quality_score ? 
-                                        `<span class="badge bg-success" title="품질 점수">품질: ${result.quality_score.toFixed(1)}</span>` : ''}
                                 </div>
                             </div>
-                            <p class="description">${result.description || ''}</p>
+                            <p class="description">${result.description}</p>
                             <div class="meta text-muted">
                                 <small>
-                                    ${result.blogger_name || result.blog_name ? 
-                                        `<span class="me-3"><i class="bi bi-person"></i> ${result.blogger_name || result.blog_name}</span>` : ''}
+                                    ${result.blog_name ? 
+                                        `<span class="me-3"><i class="bi bi-person"></i> ${result.blog_name}</span>` : ''}
                                     ${result.post_date ? 
                                         `<span class="me-3"><i class="bi bi-calendar"></i> ${result.post_date}</span>` : ''}
                                 </small>
                             </div>
-                            </div>
-                        `).join('');
+                        </div>
+                    `).join('');
                     blogResults.innerHTML = blogHtml;
-                    }
+                }
 
-                    // 뉴스 결과 표시
+                // 뉴스 결과 표시
                 const news_results = data.news_results || [];
                 if (news_results.length === 0) {
                     newsResults.innerHTML = '<p class="text-center">뉴스 검색 결과가 없습니다.</p>';
                 } else {
                     const newsHtml = news_results.map(result => `
-                            <div class="news-item">
-                                <div class="d-flex justify-content-between align-items-start">
-                                <h5 class="mb-1"><a href="${result.link || result.url}" target="_blank" class="text-decoration-none">${result.title}</a></h5>
+                        <div class="news-item">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <h5 class="mb-1"><a href="${result.link}" target="_blank" class="text-decoration-none">${result.title}</a></h5>
                                 <div class="score-badges">
                                     ${result.relevance_score ? 
                                         `<span class="badge bg-primary" title="관련도 점수">관련도: ${result.relevance_score.toFixed(1)}</span>` : ''}
-                                    ${result.quality_score ? 
-                                        `<span class="badge bg-success" title="품질 점수">품질: ${result.quality_score.toFixed(1)}</span>` : ''}
                                 </div>
                             </div>
-                            <p class="description">${result.description || ''}</p>
+                            <p class="description">${result.description}</p>
                             <div class="meta text-muted">
                                 <small>
                                     ${result.pub_date ? 
                                         `<span class="me-3"><i class="bi bi-calendar"></i> ${result.pub_date}</span>` : ''}
                                 </small>
                             </div>
-                            </div>
-                        `).join('');
+                        </div>
+                    `).join('');
                     newsResults.innerHTML = newsHtml;
                 }
             }

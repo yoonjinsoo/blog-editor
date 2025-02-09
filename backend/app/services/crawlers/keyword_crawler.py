@@ -287,7 +287,7 @@ class KeywordCrawler(BaseCrawler):
             logger.error(traceback.format_exc())
             return False
 
-    def _calculate_relevance_score(self, text: str, keyword: str, intent_info: Dict) -> float:
+    def _calculate_relevance_score(self, text: str, keyword: str, intent_pattern: Dict = None) -> float:
         """검색 결과의 관련도 점수 계산 (0-5점 척도)"""
         score = 1.0  # 기본 점수
         
@@ -296,15 +296,15 @@ class KeywordCrawler(BaseCrawler):
             score += 2.0
         
         # 2. 검색 의도 패턴 매칭 (각 0.5점)
-        if intent_info:
-            for pattern in intent_info.get('patterns', []):
-                if re.search(pattern, text):
+        if intent_pattern:
+            for pattern in intent_pattern['patterns']:
+                if re.search(pattern, text, re.IGNORECASE):
                     score += 0.5
-        
-        # 3. 관련 키워드 매칭 (각 0.3점)
-        if intent_info:
-            for keyword in intent_info.get('related_keywords', []):
-                if re.search(re.escape(keyword), text):
+                    break  # 하나의 패턴만 매칭되어도 점수 부여
+            
+            # 3. 관련 키워드 매칭 (각 0.3점)
+            for keyword in intent_pattern['related_keywords']:
+                if re.search(re.escape(keyword), text, re.IGNORECASE):
                     score += 0.3
         
         return min(5.0, score)  # 최대 5점
@@ -434,92 +434,86 @@ class KeywordCrawler(BaseCrawler):
     def get_blog_list(self, keyword: str, page: int = 1) -> List[Dict]:
         """블로그 검색 결과 조회"""
         try:
-            results = self._search_api(keyword, 'blog', start=page)
-            if not results or 'items' not in results:
-                return []
-
             # 검색 의도 분석
             intent_info = self._analyze_search_intent(keyword)
             
-            blog_list = []
-            for item in results.get('items', []):
-                # HTML 태그 제거
-                description = re.sub(r'<[^>]+>', '', item.get('description', ''))
-                
-                # 관련도 점수와 품질 점수 계산
-                relevance_score = self._calculate_relevance_score(
-                    description + ' ' + item.get('title', ''), 
-                    keyword, 
-                    intent_info
-                )
-                quality_score = self._calculate_blog_quality_score(description)
-                total_score = (relevance_score + quality_score) / 2
-                
-                # 2점 이하 결과 제외
-                if total_score <= 2.0:
-                    continue
-                
-                blog_list.append({
-                    'title': item.get('title', '').replace('<b>', '').replace('</b>', ''),
-                    'link': item.get('link', ''),
-                    'description': description,
-                    'blogger_name': item.get('bloggername', ''),
-                    'post_date': item.get('postdate', ''),
-                    'relevance_score': relevance_score,
-                    'quality_score': quality_score,
-                    'total_score': total_score
-                })
+            # API 호출
+            result = self._search_api(keyword, 'blog', start=(page-1)*10+1)
+            if not result or 'items' not in result:
+                return []
             
-            # 총점 기준으로 정렬
-            blog_list.sort(key=lambda x: x['total_score'], reverse=True)
-            return blog_list
-
+            blog_results = []
+            for item in result.get('items', []):
+                # HTML 태그 제거
+                title = re.sub('<[^<]+?>', '', item.get('title', ''))
+                description = re.sub('<[^<]+?>', '', item.get('description', ''))
+                
+                # 관련도 점수 계산
+                relevance_score = self._calculate_relevance_score(
+                    f"{title} {description}", 
+                    keyword,
+                    self.intent_patterns.get(intent_info['intents'][0]) if intent_info['intents'] else None
+                )
+                
+                # 검색 의도에 맞는 결과만 필터링 (관련도 점수 2.0 이상)
+                if relevance_score >= 2.0:
+                    blog_results.append({
+                        'title': title,
+                        'description': description,
+                        'link': item.get('link', ''),
+                        'blog_name': item.get('bloggername', ''),
+                        'post_date': item.get('postdate', ''),
+                        'relevance_score': relevance_score
+                    })
+            
+            # 관련도 점수로 정렬
+            blog_results.sort(key=lambda x: x['relevance_score'], reverse=True)
+            return blog_results[:10]  # 상위 10개만 반환
+            
         except Exception as e:
-            logger.error(f"블로그 검색 중 오류 발생: {str(e)}")
+            logger.error(f"블로그 검색 중 오류: {str(e)}")
+            logger.error(traceback.format_exc())
             return []
 
     def get_news_list(self, keyword: str, page: int = 1) -> List[Dict]:
         """뉴스 검색 결과 조회"""
         try:
-            results = self._search_api(keyword, 'news', start=page)
-            if not results or 'items' not in results:
-                return []
-
             # 검색 의도 분석
             intent_info = self._analyze_search_intent(keyword)
             
-            news_list = []
-            for item in results.get('items', []):
-                # HTML 태그 제거
-                description = re.sub(r'<[^>]+>', '', item.get('description', ''))
-                
-                # 관련도 점수와 품질 점수 계산
-                relevance_score = self._calculate_relevance_score(
-                    description + ' ' + item.get('title', ''), 
-                    keyword, 
-                    intent_info
-                )
-                quality_score = self._calculate_news_quality_score(description)
-                total_score = (relevance_score + quality_score) / 2
-                
-                # 2점 이하 결과 제외
-                if total_score <= 2.0:
-                    continue
-                
-                news_list.append({
-                    'title': item.get('title', '').replace('<b>', '').replace('</b>', ''),
-                    'link': item.get('link', ''),
-                    'description': description,
-                    'pub_date': item.get('pubDate', ''),
-                    'relevance_score': relevance_score,
-                    'quality_score': quality_score,
-                    'total_score': total_score
-                })
+            # API 호출
+            result = self._search_api(keyword, 'news', start=(page-1)*10+1)
+            if not result or 'items' not in result:
+                return []
             
-            # 총점 기준으로 정렬
-            news_list.sort(key=lambda x: x['total_score'], reverse=True)
-            return news_list
-
+            news_results = []
+            for item in result.get('items', []):
+                # HTML 태그 제거
+                title = re.sub('<[^<]+?>', '', item.get('title', ''))
+                description = re.sub('<[^<]+?>', '', item.get('description', ''))
+                
+                # 관련도 점수 계산
+                relevance_score = self._calculate_relevance_score(
+                    f"{title} {description}", 
+                    keyword,
+                    self.intent_patterns.get(intent_info['intents'][0]) if intent_info['intents'] else None
+                )
+                
+                # 검색 의도에 맞는 결과만 필터링 (관련도 점수 2.0 이상)
+                if relevance_score >= 2.0:
+                    news_results.append({
+                        'title': title,
+                        'description': description,
+                        'link': item.get('link', ''),
+                        'pub_date': item.get('pubDate', ''),
+                        'relevance_score': relevance_score
+                    })
+            
+            # 관련도 점수로 정렬
+            news_results.sort(key=lambda x: x['relevance_score'], reverse=True)
+            return news_results[:10]  # 상위 10개만 반환
+            
         except Exception as e:
-            logger.error(f"뉴스 검색 중 오류 발생: {str(e)}")
+            logger.error(f"뉴스 검색 중 오류: {str(e)}")
+            logger.error(traceback.format_exc())
             return []

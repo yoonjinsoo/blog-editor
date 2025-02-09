@@ -6,6 +6,8 @@ import logging
 from datetime import datetime
 import re
 import traceback
+import os
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -448,6 +450,9 @@ class KeywordCrawler(BaseCrawler):
                 title = re.sub('<[^<]+?>', '', item.get('title', ''))
                 description = re.sub('<[^<]+?>', '', item.get('description', ''))
                 
+                # 전체 내용 크롤링
+                full_content = self._crawl_full_content(item.get('link', ''))
+                
                 # 관련도 점수 계산
                 relevance_score = self._calculate_relevance_score(
                     f"{title} {description}", 
@@ -463,7 +468,8 @@ class KeywordCrawler(BaseCrawler):
                         'link': item.get('link', ''),
                         'blog_name': item.get('bloggername', ''),
                         'post_date': item.get('postdate', ''),
-                        'relevance_score': relevance_score
+                        'relevance_score': relevance_score,
+                        'full_content': full_content  # 전체 내용 추가
                     })
             
             # 관련도 점수로 정렬
@@ -471,8 +477,8 @@ class KeywordCrawler(BaseCrawler):
             return blog_results[:10]  # 상위 10개만 반환
             
         except Exception as e:
-            logger.error(f"블로그 검색 중 오류: {str(e)}")
-            logger.error(traceback.format_exc())
+            self.logger.error(f"블로그 검색 중 오류: {str(e)}")
+            self.logger.error(traceback.format_exc())
             return []
 
     def get_news_list(self, keyword: str, page: int = 1) -> List[Dict]:
@@ -492,6 +498,9 @@ class KeywordCrawler(BaseCrawler):
                 title = re.sub('<[^<]+?>', '', item.get('title', ''))
                 description = re.sub('<[^<]+?>', '', item.get('description', ''))
                 
+                # 전체 내용 크롤링
+                full_content = self._crawl_full_content(item.get('link', ''))
+                
                 # 관련도 점수 계산
                 relevance_score = self._calculate_relevance_score(
                     f"{title} {description}", 
@@ -506,7 +515,8 @@ class KeywordCrawler(BaseCrawler):
                         'description': description,
                         'link': item.get('link', ''),
                         'pub_date': item.get('pubDate', ''),
-                        'relevance_score': relevance_score
+                        'relevance_score': relevance_score,
+                        'full_content': full_content  # 전체 내용 추가
                     })
             
             # 관련도 점수로 정렬
@@ -514,6 +524,99 @@ class KeywordCrawler(BaseCrawler):
             return news_results[:10]  # 상위 10개만 반환
             
         except Exception as e:
-            logger.error(f"뉴스 검색 중 오류: {str(e)}")
-            logger.error(traceback.format_exc())
+            self.logger.error(f"뉴스 검색 중 오류: {str(e)}")
+            self.logger.error(traceback.format_exc())
             return []
+
+    def fetch_blog_list(self, keyword: str) -> List[Dict]:
+        """블로그 검색 결과를 가져옵니다."""
+        results = []
+        try:
+            response = self._search_api(keyword, "blog")
+            if not response or 'items' not in response:
+                return results
+            
+            for item in response['items']:
+                # 기존 정보는 그대로 유지
+                blog_info = {
+                    'title': self._clean_html_tags(item.get('title', '')),
+                    'description': self._clean_html_tags(item.get('description', '')),
+                    'link': item.get('link', ''),
+                    'blog_name': item.get('bloggername', ''),
+                    'post_date': item.get('postdate', '')
+                }
+                
+                # 전체 내용 크롤링 추가
+                full_content = self._crawl_full_content(item['link'])
+                if full_content:
+                    blog_info['full_content'] = full_content
+                    
+                results.append(blog_info)
+                
+            return results
+            
+        except Exception as e:
+            self.logger.error(f"Error in fetch_blog_list: {str(e)}")
+            return results
+
+    def fetch_news_list(self, keyword: str) -> List[Dict]:
+        """뉴스 검색 결과를 가져옵니다."""
+        results = []
+        try:
+            response = self._search_api(keyword, "news")
+            if not response or 'items' not in response:
+                return results
+            
+            for item in response['items']:
+                # 기존 정보는 그대로 유지
+                news_info = {
+                    'title': self._clean_html_tags(item.get('title', '')),
+                    'description': self._clean_html_tags(item.get('description', '')),
+                    'link': item.get('link', ''),
+                    'pub_date': item.get('pubDate', '')
+                }
+                
+                # 전체 내용 크롤링 추가
+                full_content = self._crawl_full_content(item['link'])
+                if full_content:
+                    news_info['full_content'] = full_content
+                    
+                results.append(news_info)
+                
+            return results
+            
+        except Exception as e:
+            self.logger.error(f"Error in fetch_news_list: {str(e)}")
+            return results
+
+    def _crawl_full_content(self, url: str) -> str:
+        """URL에서 전체 내용을 크롤링합니다."""
+        try:
+            import requests
+            from bs4 import BeautifulSoup
+            
+            response = requests.get(url)
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # 네이버 블로그
+            if 'blog.naver.com' in url:
+                iframe = soup.find('iframe', id='mainFrame')
+                if iframe:
+                    blog_url = f"https://blog.naver.com{iframe['src']}"
+                    response = requests.get(blog_url)
+                    soup = BeautifulSoup(response.text, 'html.parser')
+                    content = soup.find('div', {'class': 'se-main-container'})
+                    if content:
+                        return content.get_text(strip=True)
+            
+            # 일반 블로그/뉴스
+            article = soup.find('article') or soup.find('main') or soup.find('div', {'class': ['content', 'article', 'post']})
+            if article:
+                return article.get_text(strip=True)
+                
+            # 전체 텍스트
+            return soup.get_text(strip=True)
+            
+        except Exception as e:
+            self.logger.error(f"Error crawling content from {url}: {str(e)}")
+            return ""

@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, jsonify
 from ..services.crawlers.keyword_crawler import KeywordCrawler
 from ..services.post_generator.post_generator import PostGenerator
 from ..services.fact_extractor import FactExtractor
+from ..services.storage.local_storage import LocalStorage
 import os
 import logging
 import traceback
@@ -29,6 +30,9 @@ def create_app():
     
     # 사실성 정보 추출기 초기화
     fact_extractor = FactExtractor()
+    
+    # LocalStorage 초기화
+    storage = LocalStorage()
 
     @app.route('/')
     def index():
@@ -36,6 +40,8 @@ def create_app():
 
     @app.route('/search', methods=['POST'])
     def search():
+        nonlocal storage  # storage를 함수 안에서 사용하기 위해 nonlocal 선언
+        
         try:
             keyword = request.form.get('keyword')
             logger.debug(f"Received search request with keyword: {keyword}")
@@ -59,12 +65,16 @@ def create_app():
             intent_info = crawler._analyze_search_intent(keyword)
             search_keywords = crawler._expand_search_keywords(keyword, intent_info)
             
+            # 검색 결과 저장
+            filename = storage.save_search_results(keyword, blog_results, news_results)
+            
             # 검색 결과 반환
             return jsonify({
                 'blog_results': blog_results,
                 'news_results': news_results,
                 'intent': intent_info['intents'],  # 리스트로 반환
-                'search_keywords': search_keywords
+                'search_keywords': search_keywords,
+                'filename': filename
             })
             
         except Exception as e:

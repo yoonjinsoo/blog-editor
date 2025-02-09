@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>블로그 포스트 생성 도구</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css">
+    <style>
+        .keyword-chip {
+            display: inline-block;
+            padding: 5px 12px;
+            margin: 3px;
+            background-color: #e9ecef;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 0.9em;
+        }
+        .keyword-chip:hover {
+            background-color: #007bff;
+            color: white;
+        }
+        .blog-item, .news-item {
+            border-bottom: 1px solid #eee;
+            padding: 15px 0;
+        }
+        .description {
+            color: #666;
+            font-size: 0.9em;
+            margin: 8px 0;
+            line-height: 1.5;
+        }
+        .date {
+            color: #999;
+            font-size: 0.8em;
+        }
+        .badge {
+            font-weight: normal;
+        }
+        .card {
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .card-header {
+            background-color: #f8f9fa;
+            border-bottom: 1px solid #eee;
+        }
+        .content-box {
+            max-height: 300px;
+            overflow-y: auto;
+            padding: 15px;
+        }
+        .news-item {
+            border-bottom: 1px solid #eee;
+            padding: 15px 0;
+        }
+        .news-item:last-child {
+            border-bottom: none;
+        }
+        .news-item .badge {
+            background-color: #17a2b8;
+        }
+        .image-preview {
+            max-width: 100%;
+            max-height: 200px;
+            margin-bottom: 10px;
+        }
+        .post-preview {
+            border: 1px solid #ccc;
+            padding: 10px;
+            border-radius: 5px;
+            min-height: 200px;
+        }
+        .section {
+            margin-bottom: 10px;
+            padding: 10px;
+            border: 1px solid #eee;
+            border-radius: 5px;
+        }
+        .section-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .section-list {
+            display: flex;
+            flex-wrap: wrap;
+        }
+        .section-card {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin: 5px;
+            border-radius: 5px;
+            min-width: 200px;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+            cursor: move;
+        }
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .section-status {
+            font-size: 0.8em;
+        }
+        .section-content {
+            margin-bottom: 10px;
+        }
+        .section-requirements {
+            font-size: 0.8em;
+            color: #777;
+        }
+        .media-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            grid-gap: 10px;
+        }
+        .media-item {
+            border: 1px solid #ccc;
+            padding: 5px;
+            text-align: center;
+            cursor: pointer;
+        }
+        .media-item img {
+            max-width: 100%;
+            max-height: 100%;
+        }
+        .media-item:hover {
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+        }
+        .fact-card {
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+            padding: 1rem;
+        }
+        .confidence-high { background-color: #d4edda; }
+        .confidence-medium { background-color: #fff3cd; }
+        .confidence-low { background-color: #f8d7da; }
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="text-center mb-4">블로그 포스트 생성 도구</h1>
+        
+        <div class="row justify-content-center mb-4">
+            <div class="col-md-6">
+                <form id="searchForm" class="d-flex">
+                    <input type="text" id="keyword" class="form-control me-2" placeholder="메인 키워드를 입력하세요">
+                    <button type="submit" class="btn btn-primary">검색</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">검색 의도 및 관련 키워드</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <h6>검색 의도:</h6>
+                            <div id="searchIntents">
+                                <!-- 검색 의도가 여기에 표시됩니다 -->
+                            </div>
+                        </div>
+                        <div>
+                            <h6>확장 검색어:</h6>
+                            <div id="expandedKeywords">
+                                <!-- 확장된 키워드가 여기에 표시됩니다 -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h5 class="mb-0">블로그 검색 결과</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="searchIntents" class="mb-3">
+                            <!-- 검색 의도가 여기에 표시됩니다 -->
+                        </div>
+                        <div id="expandedKeywords" class="mb-3">
+                            <!-- 확장 키워드가 여기에 표시됩니다 -->
+                        </div>
+                        <div id="blogResults" class="list-group">
+                            <!-- 블로그 검색 결과가 여기에 표시됩니다 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h5 class="mb-0">뉴스 검색 결과</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="newsResults" class="list-group">
+                            <!-- 뉴스 검색 결과가 여기에 표시됩니다 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h5 class="mb-0">블로그 포스트 생성 도구</h5>
+                    </div>
+                    <div class="card-body content-box">
+                        <div id="blogResults">
+                            <!-- 블로그 검색 결과가 여기에 표시됩니다 -->
+                        </div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">뉴스 검색 결과</h5>
+                    </div>
+                    <div class="card-body content-box">
+                        <div id="newsResults">
+                            <!-- 뉴스 검색 결과가 여기에 표시됩니다 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5>포스트 구조 미리보기</h5>
+                        <div class="btn-group">
+                            <button class="btn btn-sm btn-outline-primary" onclick="generatePost()">글 생성</button>
+                            <button class="btn btn-sm btn-outline-success" onclick="saveTemplate()">템플릿 저장</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <!-- SEO 점수 표시 -->
+                        <div class="seo-score mb-3">
+                            <div class="progress">
+                                <div class="progress-bar" role="progressbar" style="width: 85%">
+                                    SEO 점수: 85/100
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 구조 체크리스트 -->
+                        <div class="structure-checklist mb-3">
+                            <h6>필수 요소</h6>
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" checked>
+                                <label>메인 이미지</label>
+                            </div>
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input">
+                                <label>섹션별 이미지 (3/5)</label>
+                            </div>
+                        </div>
+
+                        <!-- 실시간 미리보기 -->
+                        <div class="post-preview">
+                            <div class="section-list" id="sectionList">
+                                <!-- 섹션들이 드래그&드롭으로 정렬 가능하게 표시 -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 이미지/움짤 선택 패널 -->
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h5>멀티미디어 요소</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="media-grid" id="mediaGrid">
+                            <!-- 수집된 이미지/움짤 표시 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('searchForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const keyword = document.getElementById('keyword').value;
+                console.log('Submitting search with keyword:', keyword);
+                
+                try {
+                    const response = await fetch('/search', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                        },
+                        body: `keyword=${encodeURIComponent(keyword)}`
+                    });
+                    
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        console.error('Search request failed:', response.status, errorText);
+                        throw new Error(`검색 중 오류가 발생했습니다: ${response.status}`);
+                    }
+                    
+                    const data = await response.json();
+                    console.log('Search response:', data);
+                    
+                    if (data.error) {
+                        console.error('Search error:', data.error);
+                        alert(data.error);
+                        return;
+                    }
+                    
+                    // 검색 의도 표시
+                    const searchIntents = document.getElementById('searchIntents');
+                    const intentDescriptions = {
+                        'income': '💰 수입/재테크 관련',
+                        'product': '🛒 제품/서비스 관련',
+                        'info': 'ℹ️ 정보/지식 관련',
+                        'place': '📍 장소/위치 관련'
+                    };
+
+                    if (searchIntents && data.intent) {
+                        searchIntents.innerHTML = data.intent.map(intent => 
+                            `<span class="badge bg-primary me-2 mb-2">${intentDescriptions[intent] || intent}</span>`
+                        ).join('');
+                    }
+                    
+                    // 확장 키워드 표시
+                    const expandedKeywords = document.getElementById('expandedKeywords');
+                    if (expandedKeywords && data.search_keywords) {
+                        expandedKeywords.innerHTML = data.search_keywords.map(keyword =>
+                            `<span class="keyword-chip me-2 mb-2" onclick="searchKeyword('${keyword}')">${keyword}</span>`
+                        ).join('');
+                    }
+                    
+                    // 검색 결과 표시
+                    const blogResults = document.getElementById('blogResults');
+                    const newsResults = document.getElementById('newsResults');
+                    
+                    if (!blogResults || !newsResults) {
+                        console.error('Results containers not found');
+                        return;
+                    }
+
+                    const results = data.blog_results;
+                    if (!results || results.length === 0) {
+                        blogResults.innerHTML = '<p class="text-center">검색 결과가 없습니다.</p>';
+                        newsResults.innerHTML = '<p class="text-center">검색 결과가 없습니다.</p>';
+                        return;
+                    }
+
+                    // 블로그와 뉴스 결과 분리
+                    const blogs = results.filter(r => !r.is_news);
+                    const news = results.filter(r => r.is_news);
+
+                    // 블로그 결과 표시
+                    if (blogs.length > 0) {
+                        blogResults.innerHTML = blogs.map(blog => `
+                            <div class="blog-item">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <h6><a href="${blog.link || blog.url}" target="_blank">${blog.title}</a></h6>
+                                    <span class="badge bg-primary">관련도: ${blog.relevance_score || 0}</span>
+                                </div>
+                                <div class="description">${blog.description}</div>
+                                <div class="date">${blog.post_date || ''} - ${blog.blog_name || blog.blogger_name || ''}</div>
+                            </div>
+                        `).join('');
+                    } else {
+                        blogResults.innerHTML = '<p class="text-center">블로그 검색 결과가 없습니다.</p>';
+                    }
+
+                    // 뉴스 결과 표시
+                    if (news.length > 0) {
+                        newsResults.innerHTML = news.map(item => `
+                            <div class="news-item">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <h6><a href="${item.link || item.url}" target="_blank">${item.title}</a></h6>
+                                    <span class="badge bg-info">관련도: ${item.relevance_score || 0}</span>
+                                </div>
+                                <div class="description">${item.description}</div>
+                                <div class="date">${item.pub_date || item.post_date || ''}</div>
+                            </div>
+                        `).join('');
+                    } else {
+                        newsResults.innerHTML = '<p class="text-center">뉴스 검색 결과가 없습니다.</p>';
+                    }
+
+                } catch (error) {
+                    console.error('Error during search:', error);
+                    alert('검색 중 오류가 발생했습니다: ' + error.message);
+                }
+            });
+
+            // 롱테일 키워드 클릭 시 검색 실행
+            function searchKeyword(keyword) {
+                document.getElementById('keyword').value = keyword;
+                document.getElementById('searchForm').dispatchEvent(new Event('submit'));
+            }
+        });
+    </script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+beautifulsoup4==4.12.3
+requests==2.31.0
+flask==3.0.2
+python-dotenv==1.0.0
+spacy==3.7.4
+ko-core-news-lg @ https://github.com/explosion/spacy-models/releases/download/ko_core_news_lg-3.7.0/ko_core_news_lg-3.7.0-py3-none-any.whl

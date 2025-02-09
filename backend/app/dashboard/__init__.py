@@ -44,21 +44,27 @@ def create_app():
                 logger.warning("No keyword provided in search request")
                 return jsonify({'error': '키워드를 입력해주세요'})
             
-            # 검색 결과 가져오기
-            logger.debug("Calling crawler.search_with_long_tail...")
-            search_results = crawler.search_with_long_tail(keyword)
-            logger.debug(f"Search results received: {search_results}")
+            # 블로그 검색 결과 가져오기
+            blog_results = crawler.get_blog_list(keyword)
+            logger.debug(f"Blog results received: {len(blog_results)} items")
+
+            # 뉴스 검색 결과 가져오기
+            news_results = crawler.get_news_list(keyword)
+            logger.debug(f"News results received: {len(news_results)} items")
             
-            if not search_results or not search_results.get('results'):
-                logger.warning(f"No results found for keyword: {keyword}")
+            if not blog_results and not news_results:
                 return jsonify({'error': '검색 결과를 찾을 수 없습니다'})
+            
+            # 검색 의도 분석
+            intent_info = crawler._analyze_search_intent(keyword)
+            search_keywords = crawler._expand_search_keywords(keyword, intent_info)
             
             # 검색 결과 반환
             return jsonify({
-                'blog_results': search_results['results'],  # 블로그와 뉴스 결과 모두 포함
-                'intent': search_results['intent'],
-                'main_keyword': search_results['main_keyword'],
-                'search_keywords': search_results['search_keywords']
+                'blog_results': blog_results,
+                'news_results': news_results,
+                'intent': intent_info['intents'],  # 리스트로 반환
+                'search_keywords': search_keywords
             })
             
         except Exception as e:

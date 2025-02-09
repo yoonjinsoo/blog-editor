@@ -138,6 +138,28 @@
         .confidence-high { background-color: #d4edda; }
         .confidence-medium { background-color: #fff3cd; }
         .confidence-low { background-color: #f8d7da; }
+        .fact-item {
+            border-left: 4px solid #007bff;
+            margin-bottom: 15px;
+            padding: 10px 15px;
+            background-color: #f8f9fa;
+        }
+        .fact-item .source {
+            font-size: 0.85em;
+            color: #6c757d;
+        }
+        .fact-item .fact-text {
+            margin: 8px 0;
+            font-size: 1.1em;
+        }
+        .fact-category {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            margin-right: 8px;
+            background-color: #e9ecef;
+        }
     </style>
 </head>
 <body>
@@ -184,12 +206,6 @@
                         <h5 class="mb-0">블로그 검색 결과</h5>
                     </div>
                     <div class="card-body">
-                        <div id="searchIntents" class="mb-3">
-                            <!-- 검색 의도가 여기에 표시됩니다 -->
-                        </div>
-                        <div id="expandedKeywords" class="mb-3">
-                            <!-- 확장 키워드가 여기에 표시됩니다 -->
-                        </div>
                         <div id="blogResults" class="list-group">
                             <!-- 블로그 검색 결과가 여기에 표시됩니다 -->
                         </div>
@@ -210,29 +226,24 @@
             </div>
         </div>
 
-        <div class="row">
-            <div class="col-md-6">
-                <div class="card mb-3">
-                    <div class="card-header">
-                        <h5 class="mb-0">블로그 포스트 생성 도구</h5>
-                    </div>
-                    <div class="card-body content-box">
-                        <div id="blogResults">
-                            <!-- 블로그 검색 결과가 여기에 표시됩니다 -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">사실 기반 정보 요약</h5>
+                        <div class="spinner-border text-primary d-none" id="factSpinner" role="status">
+                            <span class="visually-hidden">Loading...</span>
                         </div>
                     </div>
-                </div>
-                <div class="card">
-                    <div class="card-header">
-                        <h5 class="mb-0">뉴스 검색 결과</h5>
-                    </div>
-                    <div class="card-body content-box">
-                        <div id="newsResults">
-                            <!-- 뉴스 검색 결과가 여기에 표시됩니다 -->
+                    <div class="card-body">
+                        <div id="factResults">
+                            <!-- 사실 기반 정보가 여기에 표시됩니다 -->
                         </div>
                     </div>
                 </div>
             </div>
+        </div>
+
             <div class="col-md-6">
                 <div class="card">
                     <div class="card-header d-flex justify-content-between align-items-center">
@@ -291,121 +302,222 @@
     </div>
 
     <script>
+        // 페이지 로드 시 실행
         document.addEventListener('DOMContentLoaded', function() {
-            document.getElementById('searchForm').addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const keyword = document.getElementById('keyword').value;
-                console.log('Submitting search with keyword:', keyword);
+            const searchForm = document.querySelector('#searchForm');
+            const keywordInput = document.querySelector('#keyword');
+            const blogResults = document.querySelector('#blogResults');
+            const newsResults = document.querySelector('#newsResults');
+            const loadingSpinner = document.querySelector('#loadingSpinner');
+            const errorMessage = document.querySelector('#errorMessage');
+
+            if (!searchForm) {
+                console.error('Search form not found');
+                return;
+            }
+
+            async function handleSearch(event) {
+                event.preventDefault();
+                const keyword = keywordInput.value.trim();
                 
+                if (!keyword) {
+                    showError('키워드를 입력해주세요.');
+                    return;
+                }
+
                 try {
+                    showLoading();
+                    hideError();
+
+                    const formData = new FormData();
+                    formData.append('keyword', keyword);
+
                     const response = await fetch('/search', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/x-www-form-urlencoded',
-                        },
-                        body: `keyword=${encodeURIComponent(keyword)}`
+                        body: formData
                     });
                     
-                    if (!response.ok) {
-                        const errorText = await response.text();
-                        console.error('Search request failed:', response.status, errorText);
-                        throw new Error(`검색 중 오류가 발생했습니다: ${response.status}`);
-                    }
-                    
                     const data = await response.json();
-                    console.log('Search response:', data);
                     
                     if (data.error) {
-                        console.error('Search error:', data.error);
-                        alert(data.error);
-                        return;
-                    }
-                    
-                    // 검색 의도 표시
-                    const searchIntents = document.getElementById('searchIntents');
-                    const intentDescriptions = {
-                        'income': '💰 수입/재테크 관련',
-                        'product': '🛒 제품/서비스 관련',
-                        'info': 'ℹ️ 정보/지식 관련',
-                        'place': '📍 장소/위치 관련'
-                    };
-
-                    if (searchIntents && data.intent) {
-                        searchIntents.innerHTML = data.intent.map(intent => 
-                            `<span class="badge bg-primary me-2 mb-2">${intentDescriptions[intent] || intent}</span>`
-                        ).join('');
-                    }
-                    
-                    // 확장 키워드 표시
-                    const expandedKeywords = document.getElementById('expandedKeywords');
-                    if (expandedKeywords && data.search_keywords) {
-                        expandedKeywords.innerHTML = data.search_keywords.map(keyword =>
-                            `<span class="keyword-chip me-2 mb-2" onclick="searchKeyword('${keyword}')">${keyword}</span>`
-                        ).join('');
+                        throw new Error(data.error);
                     }
                     
                     // 검색 결과 표시
-                    const blogResults = document.getElementById('blogResults');
-                    const newsResults = document.getElementById('newsResults');
-                    
-                    if (!blogResults || !newsResults) {
-                        console.error('Results containers not found');
-                        return;
-                    }
+                    await displayResults(data);
 
-                    const results = data.blog_results;
-                    if (!results || results.length === 0) {
-                        blogResults.innerHTML = '<p class="text-center">검색 결과가 없습니다.</p>';
-                        newsResults.innerHTML = '<p class="text-center">검색 결과가 없습니다.</p>';
-                        return;
-                    }
-
-                    // 블로그와 뉴스 결과 분리
-                    const blogs = results.filter(r => !r.is_news);
-                    const news = results.filter(r => r.is_news);
-
-                    // 블로그 결과 표시
-                    if (blogs.length > 0) {
-                        blogResults.innerHTML = blogs.map(blog => `
-                            <div class="blog-item">
-                                <div class="d-flex justify-content-between align-items-start">
-                                    <h6><a href="${blog.link || blog.url}" target="_blank">${blog.title}</a></h6>
-                                    <span class="badge bg-primary">관련도: ${blog.relevance_score || 0}</span>
-                                </div>
-                                <div class="description">${blog.description}</div>
-                                <div class="date">${blog.post_date || ''} - ${blog.blog_name || blog.blogger_name || ''}</div>
-                            </div>
-                        `).join('');
-                    } else {
-                        blogResults.innerHTML = '<p class="text-center">블로그 검색 결과가 없습니다.</p>';
-                    }
-
-                    // 뉴스 결과 표시
-                    if (news.length > 0) {
-                        newsResults.innerHTML = news.map(item => `
-                            <div class="news-item">
-                                <div class="d-flex justify-content-between align-items-start">
-                                    <h6><a href="${item.link || item.url}" target="_blank">${item.title}</a></h6>
-                                    <span class="badge bg-info">관련도: ${item.relevance_score || 0}</span>
-                                </div>
-                                <div class="description">${item.description}</div>
-                                <div class="date">${item.pub_date || item.post_date || ''}</div>
-                            </div>
-                        `).join('');
-                    } else {
-                        newsResults.innerHTML = '<p class="text-center">뉴스 검색 결과가 없습니다.</p>';
+                    // 검색 결과가 있을 경우에만 사실 정보 추출 시작
+                    if ((data.blog_results && data.blog_results.length > 0) || 
+                        (data.news_results && data.news_results.length > 0)) {
+                        await extractFactInformation(data);
                     }
 
                 } catch (error) {
                     console.error('Error during search:', error);
-                    alert('검색 중 오류가 발생했습니다: ' + error.message);
-                }
-            });
+                    showError(error.message);
+                } finally {
+                    hideLoading();
+                    }
+            }
 
-            // 롱테일 키워드 클릭 시 검색 실행
-            function searchKeyword(keyword) {
-                document.getElementById('keyword').value = keyword;
-                document.getElementById('searchForm').dispatchEvent(new Event('submit'));
+            async function displayResults(data) {
+                if (!blogResults || !newsResults) {
+                    console.error('Results container not found');
+                        return;
+                    }
+
+                    // 블로그 결과 표시
+                const blog_results = data.blog_results || [];
+                if (blog_results.length === 0) {
+                    blogResults.innerHTML = '<p class="text-center">블로그 검색 결과가 없습니다.</p>';
+                } else {
+                    const blogHtml = blog_results.map(result => `
+                            <div class="blog-item">
+                                <div class="d-flex justify-content-between align-items-start">
+                                <h5 class="mb-1"><a href="${result.link || result.url}" target="_blank" class="text-decoration-none">${result.title}</a></h5>
+                                <div class="score-badges">
+                                    ${result.relevance_score ? 
+                                        `<span class="badge bg-primary" title="관련도 점수">관련도: ${result.relevance_score.toFixed(1)}</span>` : ''}
+                                    ${result.quality_score ? 
+                                        `<span class="badge bg-success" title="품질 점수">품질: ${result.quality_score.toFixed(1)}</span>` : ''}
+                                </div>
+                            </div>
+                            <p class="description">${result.description || ''}</p>
+                            <div class="meta text-muted">
+                                <small>
+                                    ${result.blogger_name || result.blog_name ? 
+                                        `<span class="me-3"><i class="bi bi-person"></i> ${result.blogger_name || result.blog_name}</span>` : ''}
+                                    ${result.post_date ? 
+                                        `<span class="me-3"><i class="bi bi-calendar"></i> ${result.post_date}</span>` : ''}
+                                </small>
+                            </div>
+                            </div>
+                        `).join('');
+                    blogResults.innerHTML = blogHtml;
+                    }
+
+                    // 뉴스 결과 표시
+                const news_results = data.news_results || [];
+                if (news_results.length === 0) {
+                    newsResults.innerHTML = '<p class="text-center">뉴스 검색 결과가 없습니다.</p>';
+                } else {
+                    const newsHtml = news_results.map(result => `
+                            <div class="news-item">
+                                <div class="d-flex justify-content-between align-items-start">
+                                <h5 class="mb-1"><a href="${result.link || result.url}" target="_blank" class="text-decoration-none">${result.title}</a></h5>
+                                <div class="score-badges">
+                                    ${result.relevance_score ? 
+                                        `<span class="badge bg-primary" title="관련도 점수">관련도: ${result.relevance_score.toFixed(1)}</span>` : ''}
+                                    ${result.quality_score ? 
+                                        `<span class="badge bg-success" title="품질 점수">품질: ${result.quality_score.toFixed(1)}</span>` : ''}
+                                </div>
+                            </div>
+                            <p class="description">${result.description || ''}</p>
+                            <div class="meta text-muted">
+                                <small>
+                                    ${result.pub_date ? 
+                                        `<span class="me-3"><i class="bi bi-calendar"></i> ${result.pub_date}</span>` : ''}
+                                </small>
+                            </div>
+                            </div>
+                        `).join('');
+                    newsResults.innerHTML = newsHtml;
+                }
+            }
+
+            async function extractFactInformation(data) {
+                const factSpinner = document.getElementById('factSpinner');
+                const factResults = document.getElementById('factResults');
+                
+                try {
+                    factSpinner.classList.remove('d-none');
+                    factResults.innerHTML = '<div class="text-center">사실 정보를 추출하고 있습니다...</div>';
+
+                    const response = await fetch('/extract_facts', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(data)
+                    });
+
+                    const result = await response.json();
+                    
+                    if (result.error) {
+                        throw new Error(result.error);
+                    }
+
+                    if (!result.facts || result.facts.length === 0) {
+                        factResults.innerHTML = '<div class="text-center">추출된 사실 정보가 없습니다.</div>';
+                        return;
+                    }
+
+                    // 사실 정보 표시
+                    const factsHtml = result.facts.map(fact => `
+                        <div class="fact-item">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    ${fact.categories.map(cat => 
+                                        `<span class="fact-category">${cat}</span>`
+                                    ).join('')}
+                                </div>
+                                <div class="source">
+                                    출처: ${fact.source_type} - ${fact.source_title}
+                                </div>
+                            </div>
+                            <div class="fact-text">${fact.content}</div>
+                        </div>
+                    `).join('');
+
+                    factResults.innerHTML = factsHtml;
+
+                } catch (error) {
+                    console.error('Error extracting facts:', error);
+                    factResults.innerHTML = `<div class="alert alert-danger">사실 정보 추출 중 오류가 발생했습니다: ${error.message}</div>`;
+                } finally {
+                    factSpinner.classList.add('d-none');
+                }
+            }
+
+            // 검색 폼 이벤트 리스너 등록
+            searchForm.addEventListener('submit', handleSearch);
+
+            function showLoading() {
+                if (loadingSpinner) {
+                    loadingSpinner.style.display = 'block';
+                }
+                if (blogResults) {
+                    blogResults.style.display = 'none';
+                }
+                if (newsResults) {
+                    newsResults.style.display = 'none';
+                }
+            }
+
+            function hideLoading() {
+                if (loadingSpinner) {
+                    loadingSpinner.style.display = 'none';
+                }
+                if (blogResults) {
+                    blogResults.style.display = 'block';
+                }
+                if (newsResults) {
+                    newsResults.style.display = 'block';
+                }
+            }
+
+            function showError(message) {
+                if (errorMessage) {
+                    errorMessage.textContent = message;
+                    errorMessage.style.display = 'block';
+                }
+            }
+
+            function hideError() {
+                if (errorMessage) {
+                    errorMessage.textContent = '';
+                    errorMessage.style.display = 'none';
+                }
             }
         });
     </script>

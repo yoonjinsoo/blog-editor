@@ -70,7 +70,7 @@ class KeywordCrawler(BaseCrawler):
 
     def __init__(self, client_id: str = None, client_secret: str = None):
         BaseCrawler.__init__(self)  # 부모 클래스 초기화
-        print(f"Initializing KeywordCrawler with client_id: {client_id}, client_secret: {client_secret}")
+        logger.info(f"Initializing KeywordCrawler with client_id: {client_id}, client_secret: {client_secret}")
         
         self.client_id = client_id
         self.client_secret = client_secret
@@ -83,86 +83,237 @@ class KeywordCrawler(BaseCrawler):
         if self.api_headers:
             test_result = self._test_api_credentials()
             if not test_result:
-                print("Naver API credentials are invalid")
-                self.api_headers = None
+                logger.error("Naver API credentials are invalid")
+            # API 테스트 실패해도 헤더는 유지
         else:
-            print("No Naver API credentials provided")
+            logger.warning("No Naver API credentials provided")
+
+    def _search_api(self, keyword: str, service: str, start: int = 1, display: int = 10) -> Dict:
+        """네이버 검색 API 호출"""
+        if not self.api_headers:
+            logger.error("네이버 API 키가 설정되지 않았습니다.")
+            return {}
+
+        # 서비스별 URL 설정
+        if service == 'blog':
+            url = "https://openapi.naver.com/v1/search/blog"
+        elif service == 'news':
+            url = "https://openapi.naver.com/v1/search/news.json"
+        else:
+            logger.error(f"지원하지 않는 서비스입니다: {service}")
+            return {}
+
+        params = {
+            'query': keyword,
+            'display': display,
+            'start': start,
+            'sort': 'sim'  # 정확도순으로 변경
+        }
+
+        try:
+            logger.info(f"Calling Naver API - URL: {url}, Service: {service}, Keyword: {keyword}")
+            logger.debug(f"Headers: {self.api_headers}")
+            logger.debug(f"Params: {params}")
+            
+            # 부모 클래스의 session이나 headers를 사용하지 않고 직접 API 호출
+            response = requests.get(url, headers=self.api_headers, params=params, timeout=10)
+            logger.info(f"Response Status: {response.status_code}")
+            
+            if response.status_code != 200:
+                logger.error(f"API Error - Status: {response.status_code}")
+                logger.error(f"Error Response: {response.text}")
+                return {}
+                
+            response.raise_for_status()
+            result = response.json()
+            
+            items_count = len(result.get('items', []))
+            total_count = result.get('total', 0)
+            logger.info(f"API Response - Retrieved {items_count} items out of {total_count} total results")
+            
+            return result
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"API Request Error: {str(e)}")
+            logger.error(traceback.format_exc())
+            return {}
+        except ValueError as e:
+            logger.error(f"JSON Parsing Error: {str(e)}")
+            logger.error(traceback.format_exc())
+            return {}
+        except Exception as e:
+            logger.error(f"Unexpected Error in API call: {str(e)}")
+            logger.error(traceback.format_exc())
+            return {}
+
+    def get_news_content(self, url: str) -> Optional[Dict]:
+        """뉴스 기사 내용 크롤링"""
+        try:
+            # 일반 웹 크롤링은 부모 클래스의 session과 headers 사용
+            response = self.session.get(url, headers=self.headers)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            if "news.naver.com" in url:
+                title = soup.select_one("#title_area")
+                content = soup.select_one("#dic_area")
+                date_str = soup.select_one(".media_end_head_info_datestamp_time")
+                
+                if not all([title, content, date_str]):
+                    logger.warning(f"Missing required elements in news content: {url}")
+                    return None
+                
+                return {
+                    'title': title.text.strip(),
+                    'content': content.text.strip(),
+                    'datetime': date_str.get("data-date-time") or date_str.text.strip(),
+                    'url': url
+                }
+            return None
+        except Exception as e:
+            logger.error(f"뉴스 내용 파싱 중 오류: {str(e)}")
+            logger.error(traceback.format_exc())
+            return None
+
+    def get_blog_content(self, url: str) -> Optional[Dict]:
+        """블로그 포스트 내용 크롤링"""
+        try:
+            soup = self._get_soup(url)
+            if not soup:
+                return None
+            
+            # 네이버 블로그 파싱
+            if "blog.naver.com" in url:
+                # iframe 내부의 실제 컨텐츠 URL 찾기
+                frame = soup.select_one("iframe#mainFrame")
+                if not frame:
+                    return None
+                
+                real_url = f"https://blog.naver.com{frame['src']}"
+                soup = self._get_soup(real_url)
+                if not soup:
+                    return None
+            
+            # SE3 에디터
+            title = soup.select_one(".se-title-text")
+            content = soup.select_one(".se-main-container")
+            date = soup.select_one(".se-date")
+            
+            if not all([title, content, date]):
+                logger.warning(f"Missing required elements in blog content: {url}")
+                return None
+                
+            return {
+                'title': title.text.strip(),
+                'content': content.text.strip(),
+                'datetime': date.text.strip(),
+                'url': url
+            }
+        except Exception as e:
+            logger.error(f"블로그 내용 파싱 중 오류: {str(e)}")
+            logger.error(traceback.format_exc())
+            return None
+
+    def _analyze_search_intent(self, keyword: str) -> Dict:
+        """검색 의도 분석"""
+        keyword = keyword.lower()
+        intents = []
+        
+        # 각 의도 패턴 검사
+        for intent, data in self.intent_patterns.items():
+            for pattern in data['patterns']:
+                if re.search(pattern, keyword):
+                    intents.append(intent)
+                    break
+        
+        # 기본 의도가 없으면 'info' 추가
+        if not intents:
+            intents.append('info')
+        
+        return {
+            'intents': intents,
+            'original_keyword': keyword
+        }
+
+    def _expand_search_keywords(self, keyword: str, intent_info: Dict) -> List[str]:
+        """검색 의도에 따른 키워드 확장"""
+        keywords = [keyword]  # 원본 키워드
+        
+        for intent in intent_info['intents']:
+            if intent in self.intent_patterns:
+                # 의도별 관련 키워드 추가
+                for related_kw in self.intent_patterns[intent]['related_keywords']:
+                    keywords.append(f"{keyword} {related_kw}")
+        
+        return list(set(keywords))
 
     def _test_api_credentials(self) -> bool:
         """Test if the Naver API credentials are valid"""
         try:
-            print("Testing Naver API credentials...")
-            test_url = "https://openapi.naver.com/v1/search/blog.json"
-            test_params = {
+            logger.info("Testing Naver API credentials...")
+            
+            # 블로그 API 테스트
+            blog_url = "https://openapi.naver.com/v1/search/blog"
+            blog_params = {
                 'query': '테스트',
                 'display': 1
             }
-            print(f"Test request - URL: {test_url}, Headers: {self.api_headers}, Params: {test_params}")
-            response = requests.get(test_url, headers=self.api_headers, params=test_params)
+            logger.info(f"Testing Blog API - URL: {blog_url}")
+            blog_response = requests.get(blog_url, headers=self.api_headers, params=blog_params)
             
-            print(f"API Response - Status: {response.status_code}, Content: {response.text}")
+            # 뉴스 API 테스트
+            news_url = "https://openapi.naver.com/v1/search/news.json"
+            news_params = {
+                'query': '테스트',
+                'display': 1
+            }
+            logger.info(f"Testing News API - URL: {news_url}")
+            news_response = requests.get(news_url, headers=self.api_headers, params=news_params)
             
-            if response.status_code == 200:
-                print("Naver API credentials are valid")
+            # 두 API 모두 성공해야 True 반환
+            if blog_response.status_code == 200 and news_response.status_code == 200:
+                logger.info("Both Blog and News APIs are accessible")
                 return True
             else:
-                print(f"Naver API test failed - Status: {response.status_code}, Response: {response.text}")
+                logger.error(f"API test failed - Blog Status: {blog_response.status_code}, News Status: {news_response.status_code}")
+                if blog_response.status_code != 200:
+                    logger.error(f"Blog API Error: {blog_response.text}")
+                if news_response.status_code != 200:
+                    logger.error(f"News API Error: {news_response.text}")
                 return False
+                
         except Exception as e:
-            print(f"Error testing Naver API credentials: {str(e)}")
-            print(traceback.format_exc())
+            logger.error(f"Error testing Naver API credentials: {str(e)}")
+            logger.error(traceback.format_exc())
             return False
 
     def _calculate_relevance_score(self, text: str, keyword: str, intent_info: Dict) -> float:
-        """검색 결과의 관련도 점수 계산"""
-        score = 0.0
-        text = text.lower()
-        keyword = keyword.lower()
+        """검색 결과의 관련도 점수 계산 (0-5점 척도)"""
+        score = 1.0  # 기본 점수
         
-        # 기본 키워드 매칭
-        if keyword in text:
-            score += 1.0
+        # 1. 기본 키워드 매칭 (2점)
+        if re.search(re.escape(keyword), text, re.IGNORECASE):
+            score += 2.0
         
-        # 검색 의도별 관련 키워드 매칭
-        intents = intent_info.get('intents', [])
-        for intent in intents:
-            if intent in self.intent_patterns:
-                # 해당 의도의 패턴 매칭
-                for pattern in self.intent_patterns[intent]['patterns']:
-                    if re.search(pattern, text):
-                        score += 0.5
-                
-                # 관련 키워드 매칭
-                for related in self.intent_patterns[intent]['related_keywords']:
-                    if related in text:
-                        score += 0.3
-        
-        # 지역 정보 매칭
-        locations = intent_info.get('locations', [])
-        if locations:
-            for location in locations:
-                if location in text:
+        # 2. 검색 의도 패턴 매칭 (각 0.5점)
+        if intent_info:
+            for pattern in intent_info.get('patterns', []):
+                if re.search(pattern, text):
                     score += 0.5
         
-        # 금액 정보 매칭
-        amount_info = intent_info.get('amount_info')
-        if amount_info:
-            amount, unit = amount_info
-            amount_str = str(amount)
-            if amount_str in text and unit in text:
-                score += 0.5
+        # 3. 관련 키워드 매칭 (각 0.3점)
+        if intent_info:
+            for keyword in intent_info.get('related_keywords', []):
+                if re.search(re.escape(keyword), text):
+                    score += 0.3
         
-        # 뉴스 품질 점수
-        quality_score = self._calculate_news_quality_score(text)
-        score += quality_score
-        
-        return score
+        return min(5.0, score)  # 최대 5점
 
     def _calculate_news_quality_score(self, text: str) -> float:
-        """뉴스 컨텐츠 품질 점수 계산"""
-        score = 0.0
+        """뉴스 컨텐츠 품질 점수 계산 (0-5점 척도)"""
+        score = 3.0  # 기본 점수
         
-        # 광고성 문구 체크 (감점)
+        # 광고성 문구 체크 (각 -1점 감점)
         ad_patterns = [
             r'문의|상담|예약|신청|클릭|링크|할인|이벤트|프로모션',
             r'무료|공짜|특가|세일|쿠폰|적립|마감|한정',
@@ -170,9 +321,9 @@ class KeywordCrawler(BaseCrawler):
         ]
         for pattern in ad_patterns:
             if re.search(pattern, text):
-                score -= 0.3
+                score -= 1.0
         
-        # 뉴스 품질 체크 (가점)
+        # 뉴스 품질 체크 (각 +0.5점 가점)
         quality_patterns = [
             r'분석|조사|연구|발표|보고서|통계|결과',
             r'전문가|관계자|담당자|대표|교수|연구원',
@@ -182,9 +333,35 @@ class KeywordCrawler(BaseCrawler):
         ]
         for pattern in quality_patterns:
             if re.search(pattern, text):
-                score += 0.2
+                score += 0.5
         
-        return max(0.0, min(1.0, score))  # 0.0 ~ 1.0 범위로 제한
+        return max(0.0, min(5.0, score))  # 0-5점 범위로 제한
+
+    def _calculate_blog_quality_score(self, text: str) -> float:
+        """블로그 컨텐츠 품질 점수 계산 (0-5점 척도)"""
+        score = 3.0  # 기본 점수
+        
+        # 광고성 문구 체크 (각 -1점 감점)
+        ad_patterns = [
+            r'문의|상담|예약|신청|클릭|링크|할인|이벤트|프로모션',
+            r'무료|공짜|특가|세일|쿠폰|적립|마감|한정',
+            r'(?:광고|제휴|후원).*(?:포함|기사|내용)',
+        ]
+        for pattern in ad_patterns:
+            if re.search(pattern, text):
+                score -= 1.0
+        
+        # 블로그 품질 체크 (각 +0.5점 가점)
+        quality_patterns = [
+            r'후기|리뷰|추천|비교|사용기',
+            r'사진|영상|동영상|이미지',
+            r'(?:최근|최신|업데이트).*(?:정보|내용)',
+        ]
+        for pattern in quality_patterns:
+            if re.search(pattern, text):
+                score += 0.5
+        
+        return max(0.0, min(5.0, score))  # 0-5점 범위로 제한
 
     def search_with_long_tail(self, main_keyword: str, max_results: int = 5) -> Dict[str, List[Dict]]:
         """검색 의도 기반 검색 실행"""
@@ -254,246 +431,95 @@ class KeywordCrawler(BaseCrawler):
             logger.error(traceback.format_exc())
             raise
 
-    def _search_api(self, keyword: str, service: str, start: int = 1, display: int = 10) -> Dict:
-        """네이버 검색 API 호출"""
-        if not self.api_headers:
-            print("네이버 API 키가 설정되지 않았습니다.")
-            return {}
-
-        url = f"https://openapi.naver.com/v1/search/{service}"
-        params = {
-            'query': keyword,
-            'display': display,
-            'start': start,
-            'sort': 'sim'  # 정확도순으로 변경
-        }
-
-        try:
-            print(f"Calling Naver API - URL: {url}, Service: {service}, Keyword: {keyword}")
-            print(f"Headers: {self.api_headers}")
-            print(f"Params: {params}")
-            
-            response = requests.get(url, headers=self.api_headers, params=params)
-            print(f"Response Status: {response.status_code}")
-            print(f"Response Headers: {dict(response.headers)}")
-            print(f"Response Content: {response.text[:500]}")  # First 500 chars only
-            
-            if response.status_code != 200:
-                print(f"API Error - Status: {response.status_code}")
-                print(f"Error Response: {response.text}")
-                return {}
-                
-            response.raise_for_status()
-            result = response.json()
-            
-            items_count = len(result.get('items', []))
-            total_count = result.get('total', 0)
-            print(f"API Response - Retrieved {items_count} items out of {total_count} total results")
-            
-            return result
-            
-        except requests.exceptions.RequestException as e:
-            print(f"API Request Error: {str(e)}")
-            print(traceback.format_exc())
-            return {}
-        except ValueError as e:
-            print(f"JSON Parsing Error: {str(e)}")
-            print(traceback.format_exc())
-            return {}
-        except Exception as e:
-            print(f"Unexpected Error in API call: {str(e)}")
-            print(traceback.format_exc())
-            return {}
-
-    def _analyze_search_intent(self, keyword: str) -> Dict:
-        """검색 의도 분석"""
-        keyword = keyword.lower()
-        intents = []
-        
-        # 각 의도 패턴 검사
-        for intent, data in self.intent_patterns.items():
-            for pattern in data['patterns']:
-                if re.search(pattern, keyword):
-                    intents.append(intent)
-                    break
-        
-        # 기본 의도가 없으면 'info' 추가
-        if not intents:
-            intents.append('info')
-        
-        return {
-            'intents': intents,
-            'original_keyword': keyword
-        }
-
-    def _expand_search_keywords(self, keyword: str, intent_info: Dict) -> List[str]:
-        """검색 의도에 따른 키워드 확장"""
-        keywords = [keyword]  # 원본 키워드
-        
-        for intent in intent_info['intents']:
-            if intent in self.intent_patterns:
-                # 의도별 관련 키워드 추가
-                for related_kw in self.intent_patterns[intent]['related_keywords']:
-                    keywords.append(f"{keyword} {related_kw}")
-        
-        return list(set(keywords))
-
     def get_blog_list(self, keyword: str, page: int = 1) -> List[Dict]:
         """블로그 검색 결과 조회"""
         try:
+            results = self._search_api(keyword, 'blog', start=page)
+            if not results or 'items' not in results:
+                return []
+
             # 검색 의도 분석
             intent_info = self._analyze_search_intent(keyword)
-            logger.info(f"Search intent for '{keyword}': {intent_info}")
             
-            # 검색 키워드 확장
-            search_keywords = self._expand_search_keywords(keyword, intent_info)
-            logger.info(f"Expanded keywords for '{keyword}': {search_keywords}")
-            
-            all_results = []
-            for search_keyword in search_keywords:
-                try:
-                    result = self._search_api(search_keyword, 'blog', start=(page-1)*10 + 1)
-                    logger.info(f"API response for '{search_keyword}': {result}")
-                    
-                    if not result or 'items' not in result:
-                        logger.warning(f"No results found for keyword: {search_keyword}")
-                        continue
-
-                    for item in result['items']:
-                        try:
-                            # 필수 필드 확인
-                            required_fields = ['title', 'description', 'link']
-                            if not all(key in item for key in required_fields):
-                                missing_fields = [key for key in required_fields if key not in item]
-                                logger.warning(f"Missing required fields {missing_fields} in item: {item}")
-                                continue
-
-                            # HTML 태그 제거
-                            title = BeautifulSoup(item['title'], 'html.parser').text
-                            description = BeautifulSoup(item['description'], 'html.parser').text
-                            
-                            # 관련성 점수 계산
-                            title_score = self._calculate_relevance_score(title, keyword, intent_info)
-                            desc_score = self._calculate_relevance_score(description, keyword, intent_info)
-                            total_score = title_score * 0.7 + desc_score * 0.3
-                            
-                            blog_result = {
-                                'title': title,
-                                'description': description,
-                                'link': item['link'],
-                                'blogger_name': item.get('bloggername', ''),
-                                'post_date': item.get('postdate', ''),
-                                'relevance_score': round(total_score, 2)
-                            }
-                            
-                            # 모든 필수 필드가 있는지 한 번 더 확인
-                            if all(blog_result.get(key) for key in ['title', 'description', 'link']):
-                                all_results.append(blog_result)
-                            else:
-                                logger.warning(f"Missing required fields in processed result: {blog_result}")
-                                
-                        except Exception as e:
-                            logger.error(f"Error processing blog item: {str(e)}")
-                            continue
-                            
-                except Exception as e:
-                    logger.error(f"Error searching with keyword '{search_keyword}': {str(e)}")
+            blog_list = []
+            for item in results.get('items', []):
+                # HTML 태그 제거
+                description = re.sub(r'<[^>]+>', '', item.get('description', ''))
+                
+                # 관련도 점수와 품질 점수 계산
+                relevance_score = self._calculate_relevance_score(
+                    description + ' ' + item.get('title', ''), 
+                    keyword, 
+                    intent_info
+                )
+                quality_score = self._calculate_blog_quality_score(description)
+                total_score = (relevance_score + quality_score) / 2
+                
+                # 2점 이하 결과 제외
+                if total_score <= 2.0:
                     continue
+                
+                blog_list.append({
+                    'title': item.get('title', '').replace('<b>', '').replace('</b>', ''),
+                    'link': item.get('link', ''),
+                    'description': description,
+                    'blogger_name': item.get('bloggername', ''),
+                    'post_date': item.get('postdate', ''),
+                    'relevance_score': relevance_score,
+                    'quality_score': quality_score,
+                    'total_score': total_score
+                })
             
-            logger.info(f"Found {len(all_results)} valid results for '{keyword}'")
-            return all_results
-            
+            # 총점 기준으로 정렬
+            blog_list.sort(key=lambda x: x['total_score'], reverse=True)
+            return blog_list
+
         except Exception as e:
-            logger.error(f"Error in get_blog_list: {str(e)}")
-            logger.error(traceback.format_exc())
-            raise
+            logger.error(f"블로그 검색 중 오류 발생: {str(e)}")
+            return []
 
     def get_news_list(self, keyword: str, page: int = 1) -> List[Dict]:
         """뉴스 검색 결과 조회"""
-        result = self._search_api(keyword, 'news', start=(page-1)*10 + 1)
-        
-        news_list = []
-        for item in result.get('items', []):
-            try:
-                title = BeautifulSoup(item['title'], 'html.parser').text
-                description = BeautifulSoup(item['description'], 'html.parser').text
+        try:
+            results = self._search_api(keyword, 'news', start=page)
+            if not results or 'items' not in results:
+                return []
+
+            # 검색 의도 분석
+            intent_info = self._analyze_search_intent(keyword)
+            
+            news_list = []
+            for item in results.get('items', []):
+                # HTML 태그 제거
+                description = re.sub(r'<[^>]+>', '', item.get('description', ''))
                 
-                # 관련성 점수 계산
-                title_score = self._calculate_relevance_score(title, keyword, self._analyze_search_intent(keyword))
-                desc_score = self._calculate_relevance_score(description, keyword, self._analyze_search_intent(keyword))
-                total_score = title_score * 0.7 + desc_score * 0.3  # 제목에 더 높은 가중치
+                # 관련도 점수와 품질 점수 계산
+                relevance_score = self._calculate_relevance_score(
+                    description + ' ' + item.get('title', ''), 
+                    keyword, 
+                    intent_info
+                )
+                quality_score = self._calculate_news_quality_score(description)
+                total_score = (relevance_score + quality_score) / 2
+                
+                # 2점 이하 결과 제외
+                if total_score <= 2.0:
+                    continue
                 
                 news_list.append({
-                    'title': title,
+                    'title': item.get('title', '').replace('<b>', '').replace('</b>', ''),
+                    'link': item.get('link', ''),
                     'description': description,
-                    'url': item['link'],
                     'pub_date': item.get('pubDate', ''),
-                    'relevance_score': round(total_score, 2)
+                    'relevance_score': relevance_score,
+                    'quality_score': quality_score,
+                    'total_score': total_score
                 })
-            except Exception as e:
-                logger.error(f"뉴스 결과 파싱 중 오류: {str(e)}")
-                continue
-        
-        # 관련성 점수순으로 정렬
-        news_list.sort(key=lambda x: x['relevance_score'], reverse=True)
-        return news_list[:20]  # 상위 20개 결과만 반환
+            
+            # 총점 기준으로 정렬
+            news_list.sort(key=lambda x: x['total_score'], reverse=True)
+            return news_list
 
-    def get_news_content(self, url: str) -> Optional[Dict]:
-        """뉴스 기사 내용 크롤링"""
-        soup = self._get_soup(url)
-        if not soup:
-            return None
-        
-        try:
-            if "news.naver.com" in url:
-                title = soup.select_one("#title_area")
-                content = soup.select_one("#dic_area")
-                date_str = soup.select_one(".media_end_head_info_datestamp_time")
-                
-                if not all([title, content, date_str]):
-                    return None
-                
-                return {
-                    'title': title.text.strip(),
-                    'content': content.text.strip(),
-                    'datetime': date_str.get("data-date-time") or date_str.text.strip(),
-                    'url': url
-                }
-            return None
         except Exception as e:
-            logger.error(f"뉴스 내용 파싱 중 오류: {str(e)}")
-            return None
-
-    def get_blog_content(self, url: str) -> Optional[Dict]:
-        """블로그 포스트 내용 크롤링"""
-        if "blog.naver.com" not in url:
-            return None
-            
-        soup = self._get_soup(url)
-        if not soup:
-            return None
-        
-        try:
-            iframe = soup.select_one("#mainFrame")
-            if iframe:
-                blog_url = f"https://blog.naver.com{iframe['src']}"
-                soup = self._get_soup(blog_url)
-                if not soup:
-                    return None
-            
-            title = soup.select_one(".se-title-text")
-            content = soup.select_one(".se-main-container")
-            date = soup.select_one(".se-date")
-            
-            if not all([title, content, date]):
-                return None
-                
-            return {
-                'title': title.text.strip(),
-                'content': content.text.strip(),
-                'datetime': date.text.strip(),
-                'url': url
-            }
-        except Exception as e:
-            logger.error(f"블로그 내용 파싱 중 오류: {str(e)}")
-            return None
+            logger.error(f"뉴스 검색 중 오류 발생: {str(e)}")
+            return []

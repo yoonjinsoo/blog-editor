@@ -1,5 +1,5 @@
 from .base import BaseCrawler
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Any
 import requests
 from bs4 import BeautifulSoup
 import logging
@@ -365,73 +365,66 @@ class KeywordCrawler(BaseCrawler):
         
         return max(0.0, min(5.0, score))  # 0-5점 범위로 제한
 
-    def search_with_long_tail(self, main_keyword: str, max_results: int = 5) -> Dict[str, List[Dict]]:
+    def search_with_long_tail(self, main_keyword: str, max_results: int = 5) -> Dict[str, Any]:
         """검색 의도 기반 검색 실행"""
         try:
-            # 검색어 전처리 및 의도 분석
-            main_keyword = main_keyword.strip()
-            logger.info(f"Starting search with keyword: {main_keyword}")
-            
+            # 검색 의도 분석
             intent_info = self._analyze_search_intent(main_keyword)
-            logger.info(f"Analyzed search intent: {intent_info}")
             
             # 검색 키워드 확장
-            search_keywords = self._expand_search_keywords(main_keyword, intent_info)
-            logger.info(f"Expanded keywords: {search_keywords}")
+            keywords = self._expand_search_keywords(main_keyword, intent_info)
             
-            # 블로그 검색
-            all_results = []
-            for keyword in [main_keyword] + search_keywords[:3]:
-                logger.info(f"Searching for keyword: {keyword}")
-                blog_results = self.get_blog_list(keyword)
-                if blog_results:
-                    logger.info(f"Found {len(blog_results)} blog results for {keyword}")
-                    for result in blog_results:
-                        if not all(key in result for key in ['title', 'description', 'link']):
-                            logger.warning(f"Missing required fields in result: {result}")
-                            continue
-                        all_results.append(result)
-                
-                # 뉴스 검색 추가
-                news_results = self.get_news_list(keyword)
-                if news_results:
-                    logger.info(f"Found {len(news_results)} news results for {keyword}")
-                    for result in news_results:
-                        if not all(key in result for key in ['title', 'description', 'link']):
-                            logger.warning(f"Missing required fields in result: {result}")
-                            continue
-                        result['is_news'] = True  # 뉴스 결과 구분
-                        all_results.append(result)
-            
-            # 관련도 점수로 정렬하고 필터링
-            all_results = sorted(all_results, key=lambda x: x.get('relevance_score', 0), reverse=True)
-            filtered_results = [
-                result for result in all_results 
-                if result.get('relevance_score', 0) >= 0.5  # 최소 관련도 점수
-            ]
-            
-            # 중복 제거
-            seen_urls = set()
-            unique_results = []
-            for result in filtered_results:
-                url = result.get('link')
-                if url and url not in seen_urls:
-                    seen_urls.add(url)
-                    unique_results.append(result)
-            
-            logger.info(f"Final unique results: {len(unique_results)}")
-            
-            return {
-                'main_keyword': main_keyword,
-                'search_keywords': search_keywords[:10],
-                'results': unique_results[:max_results],
-                'intent': intent_info.get('intents', ['info'])
+            all_results = {
+                'blog_results': [],
+                'news_results': []
             }
             
+            # 각 키워드로 검색 실행
+            for keyword in keywords[:max_results]:  # 최대 키워드 수 제한
+                blog_results = self.fetch_blog_list(keyword)
+                news_results = self.fetch_news_list(keyword)
+                
+                all_results['blog_results'].extend(blog_results)
+                all_results['news_results'].extend(news_results)
+            
+            # 중복 제거 (URL 기준)
+            all_results['blog_results'] = self._remove_duplicates(all_results['blog_results'], 'link')
+            all_results['news_results'] = self._remove_duplicates(all_results['news_results'], 'link')
+            
+            # 결과 저장
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"{timestamp}_{main_keyword}.json"
+            
+            # collected 폴더에 저장
+            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            data_dir = os.path.join(base_dir, 'data')
+            collected_dir = os.path.join(data_dir, 'collected')
+            facts_dir = os.path.join(data_dir, 'facts')
+            
+            # 필요한 폴더들 생성
+            os.makedirs(collected_dir, exist_ok=True)
+            os.makedirs(facts_dir, exist_ok=True)
+            
+            # 크롤링 결과 저장
+            file_path = os.path.join(collected_dir, filename)
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(all_results, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"검색 결과가 {file_path}에 저장되었습니다.")
+            
+            # 저장된 파일에서 바로 사실 추출 실행
+            from ..fact_extractor import FactExtractor
+            extractor = FactExtractor()
+            facts_file = extractor.extract_facts_from_json(file_path)  # 저장된 파일 경로 전달
+            
+            logger.info(f"사실 추출이 완료되었습니다: {os.path.basename(facts_file)}")
+            
+            return all_results
+            
         except Exception as e:
-            logger.error(f"Error in search_with_long_tail: {str(e)}")
+            logger.error(f"검색 중 오류 발생: {str(e)}")
             logger.error(traceback.format_exc())
-            raise
+            return {'blog_results': [], 'news_results': []}
 
     def get_blog_list(self, keyword: str, page: int = 1) -> List[Dict]:
         """블로그 검색 결과 조회"""
@@ -620,3 +613,21 @@ class KeywordCrawler(BaseCrawler):
         except Exception as e:
             self.logger.error(f"Error crawling content from {url}: {str(e)}")
             return ""
+
+    def save_to_json(self, search_results: Dict[str, Any], keyword: str) -> str:
+        """검색 결과를 JSON 파일로 저장합니다."""
+        # 저장 디렉토리 생성
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        collected_dir = os.path.join(base_dir, 'data', 'collected')
+        os.makedirs(collected_dir, exist_ok=True)
+        
+        # 파일명 생성
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"{timestamp}_{keyword}.json"
+        filepath = os.path.join(collected_dir, filename)
+        
+        # JSON 파일로 저장
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(search_results, f, ensure_ascii=False, indent=2)
+            
+        return filepath

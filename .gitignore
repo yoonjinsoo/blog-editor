@@ -54,6 +54,20 @@ yarn-error.log*
 # 프로젝트 특정 폴더
 /error_screenshots/
 /logs/
+
+# 생성된 포스트 파일들
+/backend/generated_posts/
+/backend/app/data/collected/
+/backend/app/data/facts/
+/backend/app/data/generated/
+
+# 포스팅 관련 파일들
+*_포스팅.json
+*_포스팅_*.json
+facts_*.json
+*_post.json
+*_post.html
+
 # 기타
 .idea/
 *.iml

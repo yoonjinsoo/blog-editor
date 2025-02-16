@@ -1,61 +1,122 @@
+from typing import Dict, List, Any
 import re
-from typing import List, Dict
+import os
+import json
+from datetime import datetime
 
 class FactExtractor:
-    def __init__(self):
-        # 사실성 정보를 나타내는 패턴
-        self.fact_patterns = [
-            r'\d+[%％]', # 백분율
-            r'\d+년', # 연도
-            r'\d+월', # 월
-            r'\d+일', # 일
-            r'약 \d+', # 대략적인 수치
-            r'\d+억원', # 금액
-            r'\d+만원',
-            r'\d+위', # 순위
-        ]
+    def extract_structured_facts(self, raw_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """원본 데이터에서 구조화된 팩트 추출"""
+        facts = {
+            'core_facts': [],
+            'statistics': [],
+            'expert_quotes': [],
+            'examples': [],
+            'references': []
+        }
         
-    def extract_facts(self, text: str) -> List[str]:
-        """텍스트에서 사실성 정보를 추출합니다."""
+        for item in raw_data:
+            content = item.get('full_content', '')
+            if not content:
+                continue
+                
+            # 핵심 사실 추출
+            facts['core_facts'].append({
+                'text': content,
+                'source': item.get('blog_name', ''),
+                'date': item.get('post_date', '')
+            })
+            
+            # 참조 추가
+            if item.get('link'):
+                facts['references'].append({
+                    'url': item['link'],
+                    'title': item.get('title', ''),
+                    'blog_name': item.get('blog_name', '')
+                })
+        
+        return facts
+    
+    def _extract_core_facts(self, text: str) -> List[str]:
+        """핵심 사실 추출"""
         facts = []
         
         # 문장 단위로 분리
-        sentences = text.split('.')
+        sentences = re.split(r'[.!?][ \t]+', text)
         
         for sentence in sentences:
-            # 패턴 매칭으로 사실성 정보 확인
-            for pattern in self.fact_patterns:
-                matches = re.finditer(pattern, sentence)
-                for match in matches:
-                    # 매칭된 문장 전체를 컨텍스트로 저장
-                    fact_sentence = sentence.strip()
-                    if fact_sentence and fact_sentence not in facts:
-                        facts.append(fact_sentence)
-                        
-        return facts
+            sentence = sentence.strip()
+            # 핵심 사실로 보이는 문장 선택
+            if len(sentence) > 20 and len(sentence) < 100:
+                if any(keyword in sentence for keyword in ['은', '는', '이란', '란', '특징', '장점']):
+                    facts.append(sentence)
+        
+        return facts[:5]  # 상위 5개만 선택
+    
+    def _extract_statistics(self, text: str) -> List[str]:
+        """통계 데이터 추출"""
+        stats = []
+        
+        # 숫자가 포함된 문장 찾기
+        number_pattern = r'\d+(?:[,.]\d+)?(?:\s*[%만천억원]|\s*개월|\s*시간|\s*분|\s*초)?'
+        sentences = re.split(r'[.!?]\s+', text)
+        
+        for sentence in sentences:
+            if re.search(number_pattern, sentence):
+                sentence = sentence.strip()
+                if len(sentence) > 10 and len(sentence) < 150:
+                    stats.append(sentence)
+        
+        return stats[:5]  # 상위 5개만 선택
+    
+    def _extract_expert_quotes(self, text: str) -> List[str]:
+        """전문가 인용구 추출"""
+        quotes = []
+        
+        # 인용구로 보이는 패턴 찾기
+        quote_patterns = [
+            r'"([^"]+)"',
+            r'\'([^\']+)\'',
+            r'[""]([^""]+)[""]'
+        ]
+        
+        for pattern in quote_patterns:
+            matches = re.findall(pattern, text)
+            for match in matches:
+                if len(match) > 20 and len(match) < 200:
+                    quotes.append(match.strip())
+        
+        return quotes[:3]  # 상위 3개만 선택
+    
+    def _extract_examples(self, text: str) -> List[str]:
+        """예시 추출"""
+        examples = []
+        
+        # 예시 문구 패턴
+        example_patterns = [
+            r'예를\s+들[면어]([^.!?]+)[.!?]',
+            r'예시로([^.!?]+)[.!?]',
+            r'사례로([^.!?]+)[.!?]',
+            r'경우에는([^.!?]+)[.!?]'
+        ]
+        
+        for pattern in example_patterns:
+            matches = re.findall(pattern, text)
+            for match in matches:
+                if len(match) > 20 and len(match) < 200:
+                    examples.append(match.strip())
+        
+        return examples[:3]  # 상위 3개만 선택
 
-    def process_search_results(self, search_results: Dict) -> Dict:
-        """검색 결과에서 사실성 정보를 추출하여 반환합니다."""
-        facts = []
+    def save_facts(self, facts: Dict[str, Any], output_dir: str, keyword: str) -> str:
+        """추출된 팩트를 파일로 저장"""
+        os.makedirs(output_dir, exist_ok=True)
         
-        # 블로그 검색 결과 처리
-        if 'blog_results' in search_results:
-            for post in search_results['blog_results']:
-                description = post.get('description', '')
-                extracted_facts = self.extract_facts(description)
-                facts.extend(extracted_facts)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"{timestamp}_{keyword}_facts.json"
+        filepath = os.path.join(output_dir, filename)
         
-        # 뉴스 검색 결과 처리
-        if 'news_results' in search_results:
-            for news in search_results['news_results']:
-                description = news.get('description', '')
-                extracted_facts = self.extract_facts(description)
-                facts.extend(extracted_facts)
-                
-        # 중복 제거
-        facts = list(set(facts))
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(facts, f, ensure_ascii=False, indent=2)
         
-        # 원본 검색 결과에 사실성 정보 추가
-        search_results['extracted_facts'] = facts
-        
-        return search_results
+        return filepath

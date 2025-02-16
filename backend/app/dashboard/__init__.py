@@ -6,6 +6,7 @@ from ..services.storage.local_storage import LocalStorage
 import os
 import logging
 import traceback
+import json
 
 # Configure root logger
 logging.basicConfig(level=logging.DEBUG)
@@ -97,5 +98,40 @@ def create_app():
         except Exception as e:
             logger.error(f"Error in generate_post endpoint: {str(e)}", exc_info=True)
             return jsonify({'error': f'포스트 생성 중 오류가 발생했습니다: {str(e)}'}), 500
+
+    @app.route('/api/extract-facts', methods=['POST'])
+    def extract_facts():
+        """수집된 파일들에서 사실을 추출합니다."""
+        try:
+            collected_dir = os.path.join(app.root_path, 'data', 'collected')
+            json_files = [f for f in os.listdir(collected_dir) if f.endswith('.json')]
+            if not json_files:
+                return jsonify({
+                    'success': False,
+                    'error': '수집된 파일이 없습니다.'
+                })
+            
+            # 가장 최근 파일 사용
+            latest_file = max(json_files, key=lambda x: os.path.getctime(os.path.join(collected_dir, x)))
+            file_path = os.path.join(collected_dir, latest_file)
+            
+            fact_extractor = FactExtractor()
+            output_path = fact_extractor.extract_facts_from_json(file_path)
+            
+            # 추출된 사실 읽기
+            with open(output_path, 'r', encoding='utf-8') as f:
+                facts = json.load(f)
+            
+            return jsonify({
+                'success': True,
+                'facts': facts
+            })
+            
+        except Exception as e:
+            logger.error(f"사실 추출 중 오류 발생: {str(e)}")
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
 
     return app
